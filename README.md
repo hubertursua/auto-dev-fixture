@@ -1,6 +1,6 @@
 # payments-core
 
-A small, in-memory TypeScript library for payment primitives: payment records,
+A small in-memory TypeScript library for payment primitives: payment records,
 wallets, an append-only ledger and payouts. It has no runtime dependencies and
 does no I/O; callers own persistence and transport.
 
