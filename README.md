@@ -19,8 +19,10 @@ does no I/O; callers own persistence and transport.
   `INSUFFICIENT_FUNDS` rather than going negative.
 - **Ledger** entries are append-only credits and debits; balances are derived
   from the entries.
-- **Payouts** move money out of a wallet. Requesting one reserves the amount;
-  cancelling returns it; paying records a debit in the ledger.
+- **Payouts** move money out of a wallet. Requesting one reserves
+  `amount + payoutFee` and records the fee on the payout; cancelling returns
+  both; paying records a `payout <id>` debit in the ledger and, for a non-zero
+  fee, a separate `payout fee <id>` debit.
 
   | Status       | Can move to                    |
   | ------------ | ------------------------------ |
@@ -38,6 +40,9 @@ does no I/O; callers own persistence and transport.
   (a `Date` or an ISO 8601 string); `expiresAt` must be after `issuedAt`.
 - **Configuration** lives in `src/config.ts`: `defaultConfig` plus
   `withOverrides(partial)`. Stores and services accept a `config` option.
+  `payoutFee` is a flat per-payout fee in minor units (default 0);
+  `withOverrides` and `createPayoutService` throw when it is not an integer in
+  `[0, Number.MAX_SAFE_INTEGER]`.
 
 Time and ids are injected (`clock` option, sequential ids), so behaviour is
 deterministic in tests.

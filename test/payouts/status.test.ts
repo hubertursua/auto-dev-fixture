@@ -13,6 +13,7 @@ const payout = (status: PayoutStatus): Payout => ({
   id: 'po_1',
   walletId: 'w1',
   amount: 5_000,
+  fee: 0,
   status,
   requestedAt: at,
   updatedAt: at,
@@ -72,5 +73,12 @@ describe('payout status', () => {
     const original = payout('pending');
     transition(original, 'approved');
     expect(original.status).toBe('pending');
+  });
+
+  it('copies the fee onto the moved payout', () => {
+    expect(transition({ ...payout('pending'), fee: 75 }, 'approved')).toMatchObject({
+      ok: true,
+      value: { fee: 75, status: 'approved' },
+    });
   });
 });

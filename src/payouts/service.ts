@@ -1,5 +1,5 @@
 import { sequentialIds, systemClock, type Clock } from '../clock.js';
-import { defaultConfig, type Config } from '../config.js';
+import { assertValidPayoutFee, defaultConfig, type Config } from '../config.js';
 import {
   err,
   ok,
@@ -22,17 +22,23 @@ export type RequestPayoutError =
 export type UpdatePayoutError = PayoutNotFoundError | InvalidTransitionError;
 
 export interface PayoutService {
-  /** Reserves `amount` from the wallet and creates a pending payout. */
+  /**
+   * Reserves `amount + config.payoutFee` from the wallet and creates a pending payout with the
+   * fee stamped on it. The minimum is checked against `amount` alone.
+   */
   request(walletId: string, amount: number): Result<Payout, RequestPayoutError>;
   approve(payoutId: string): Result<Payout, UpdatePayoutError>;
   startProcessing(payoutId: string): Result<Payout, UpdatePayoutError>;
-  /** Marks the payout as sent and records it in the ledger. */
+  /**
+   * Marks the payout as sent and records it in the ledger: a `payout <id>` debit for the amount
+   * and, when the payout's fee is non-zero, a separate `payout fee <id>` debit for the fee.
+   */
   markPaid(payoutId: string): Result<Payout, UpdatePayoutError>;
   /** Marks a processing payout as failed. The reserved funds stay held until it is retried or cancelled. */
   markFailed(payoutId: string): Result<Payout, UpdatePayoutError>;
   /** Puts a failed payout back to pending. */
   retry(payoutId: string): Result<Payout, UpdatePayoutError>;
-  /** Cancels the payout and returns the reserved funds to the wallet. */
+  /** Cancels the payout and returns the reserved `amount + fee` to the wallet. */
   cancel(payoutId: string): Result<Payout, UpdatePayoutError>;
   get(payoutId: string): Payout | undefined;
   /** Payouts that have not reached a terminal status, oldest first. */
@@ -49,26 +55,35 @@ export interface PayoutServiceDeps {
 export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
   const { wallets, ledger } = deps;
   const config = deps.config ?? defaultConfig;
+  assertValidPayoutFee(config.payoutFee);
+  const fee = config.payoutFee;
   const clock = deps.clock ?? systemClock;
   const nextId = sequentialIds('po');
   const payouts = new Map<string, Payout>();
 
+  const debit = (payout: Payout, amount: number, description: string): void => {
+    const entry = ledger.append({
+      account: payout.walletId,
+      direction: 'debit',
+      amount,
+      description,
+    });
+    if (!entry.ok) {
+      throw new Error(`could not record payout ${payout.id}: ${entry.error.message}`);
+    }
+  };
+
   const settle = (payout: Payout, to: PayoutStatus): void => {
     if (to === 'cancelled') {
-      const refund = wallets.deposit(payout.walletId, payout.amount);
+      const refund = wallets.deposit(payout.walletId, payout.amount + payout.fee);
       if (!refund.ok) {
         throw new Error(`could not refund payout ${payout.id}: ${refund.error.message}`);
       }
     }
     if (to === 'paid') {
-      const entry = ledger.append({
-        account: payout.walletId,
-        direction: 'debit',
-        amount: payout.amount,
-        description: `payout ${payout.id}`,
-      });
-      if (!entry.ok) {
-        throw new Error(`could not record payout ${payout.id}: ${entry.error.message}`);
+      debit(payout, payout.amount, `payout ${payout.id}`);
+      if (payout.fee > 0) {
+        debit(payout, payout.fee, `payout fee ${payout.id}`);
       }
     }
   };
@@ -106,7 +121,15 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
           requested: valid.value,
         });
       }
-      const reserved = wallets.withdraw(walletId, valid.value);
+      const charge = valid.value + fee;
+      if (!Number.isSafeInteger(charge)) {
+        return err({
+          code: 'INVALID_AMOUNT',
+          message: `amount ${String(valid.value)} plus payout fee ${String(fee)} exceeds ${String(Number.MAX_SAFE_INTEGER)}`,
+          amount: valid.value,
+        });
+      }
+      const reserved = wallets.withdraw(walletId, charge);
       if (!reserved.ok) {
         return reserved;
       }
@@ -115,6 +138,7 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
         id: nextId(),
         walletId,
         amount: valid.value,
+        fee,
         status: 'pending',
         requestedAt: now,
         updatedAt: now,

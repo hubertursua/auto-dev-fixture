@@ -16,6 +16,8 @@ export interface Payout {
   readonly walletId: string;
   /** Amount in minor units. */
   readonly amount: number;
+  /** Fee in minor units stamped when the payout was requested; held and refunded with `amount`. */
+  readonly fee: number;
   readonly status: PayoutStatus;
   readonly requestedAt: Date;
   readonly updatedAt: Date;
