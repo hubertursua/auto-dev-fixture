@@ -38,6 +38,9 @@ does no I/O; callers own persistence and transport.
   (a `Date` or an ISO 8601 string); `expiresAt` must be after `issuedAt`.
 - **Configuration** lives in `src/config.ts`: `defaultConfig` plus
   `withOverrides(partial)`. Stores and services accept a `config` option.
+  Payout requests must fall between `minPayoutAmount` (default 100) and
+  `maxPayoutAmount` (default 1,000,000); amounts outside return
+  `BELOW_MINIMUM_PAYOUT` or `ABOVE_MAXIMUM_PAYOUT`.
 
 Time and ids are injected (`clock` option, sequential ids), so behaviour is
 deterministic in tests.

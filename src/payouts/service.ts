@@ -3,6 +3,7 @@ import { defaultConfig, type Config } from '../config.js';
 import {
   err,
   ok,
+  type AboveMaximumPayoutError,
   type BelowMinimumPayoutError,
   type InsufficientFundsError,
   type InvalidAmountError,
@@ -17,7 +18,11 @@ import type { WalletStore } from '../wallet/wallet.js';
 import { isTerminal, transition, type Payout, type PayoutStatus } from './status.js';
 
 export type RequestPayoutError =
-  InvalidAmountError | BelowMinimumPayoutError | WalletNotFoundError | InsufficientFundsError;
+  | InvalidAmountError
+  | BelowMinimumPayoutError
+  | AboveMaximumPayoutError
+  | WalletNotFoundError
+  | InsufficientFundsError;
 
 export type UpdatePayoutError = PayoutNotFoundError | InvalidTransitionError;
 
@@ -103,6 +108,15 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
           code: 'BELOW_MINIMUM_PAYOUT',
           message: `payouts must be at least ${String(config.minPayoutAmount)}, got ${String(valid.value)}`,
           minimum: config.minPayoutAmount,
+          requested: valid.value,
+        });
+      }
+      // Fail closed: a NaN or missing maximum refuses every request instead of disabling the cap.
+      if (!(valid.value <= config.maxPayoutAmount)) {
+        return err({
+          code: 'ABOVE_MAXIMUM_PAYOUT',
+          message: `payouts must be at most ${String(config.maxPayoutAmount)}, got ${String(valid.value)}`,
+          maximum: config.maxPayoutAmount,
           requested: valid.value,
         });
       }
