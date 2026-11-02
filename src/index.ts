@@ -8,6 +8,7 @@ export type {
   WalletExistsError,
   PayoutNotFoundError,
   BelowMinimumPayoutError,
+  AboveMaximumPayoutError,
   InvalidTransitionError,
   InvalidDateError,
   InvalidPageError,

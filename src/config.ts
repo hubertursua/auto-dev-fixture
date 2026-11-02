@@ -6,12 +6,19 @@ export interface Config {
   readonly maxPageSize: number;
   /** Smallest payout amount, in minor units, that can be requested. */
   readonly minPayoutAmount: number;
+  /**
+   * Largest payout amount, in minor units, a single request may ask for. Inclusive. Must be a safe
+   * integer above zero; any other value makes `request` refuse every payout that clears the amount
+   * and minimum checks.
+   */
+  readonly maxPayoutAmount: number;
 }
 
 export const defaultConfig: Config = Object.freeze({
   defaultPageSize: 20,
   maxPageSize: 100,
   minPayoutAmount: 100,
+  maxPayoutAmount: 1_000_000,
 });
 
 /** Returns the defaults with `overrides` applied. Neither input is modified. */

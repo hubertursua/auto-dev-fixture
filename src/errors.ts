@@ -48,6 +48,11 @@ export interface BelowMinimumPayoutError extends LibraryError<'BELOW_MINIMUM_PAY
   readonly requested: number;
 }
 
+export interface AboveMaximumPayoutError extends LibraryError<'ABOVE_MAXIMUM_PAYOUT'> {
+  readonly maximum: number;
+  readonly requested: number;
+}
+
 export interface InvalidTransitionError extends LibraryError<'INVALID_TRANSITION'> {
   readonly from: string;
   readonly to: string;

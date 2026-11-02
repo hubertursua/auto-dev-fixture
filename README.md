@@ -20,7 +20,13 @@ does no I/O; callers own persistence and transport.
 - **Ledger** entries are append-only credits and debits; balances are derived
   from the entries.
 - **Payouts** move money out of a wallet. Requesting one reserves the amount;
-  cancelling returns it; paying records a debit in the ledger.
+  cancelling returns it; paying records a debit in the ledger. A request must
+  lie between `minPayoutAmount` and `maxPayoutAmount` inclusive (defaults 100
+  and 1,000,000 minor units); amounts outside that range are refused with
+  `BELOW_MINIMUM_PAYOUT` / `ABOVE_MAXIMUM_PAYOUT` before anything is reserved.
+  `maxPayoutAmount` must be a whole number of minor units above zero; with any
+  other value (NaN, Infinity, a string, …) every payout request that clears the
+  amount and minimum checks is turned down with `ABOVE_MAXIMUM_PAYOUT`.
 
   | Status       | Can move to                    |
   | ------------ | ------------------------------ |

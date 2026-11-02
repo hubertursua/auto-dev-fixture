@@ -3,6 +3,7 @@ import { defaultConfig, type Config } from '../config.js';
 import {
   err,
   ok,
+  type AboveMaximumPayoutError,
   type BelowMinimumPayoutError,
   type InsufficientFundsError,
   type InvalidAmountError,
@@ -17,12 +18,20 @@ import type { WalletStore } from '../wallet/wallet.js';
 import { isTerminal, transition, type Payout, type PayoutStatus } from './status.js';
 
 export type RequestPayoutError =
-  InvalidAmountError | BelowMinimumPayoutError | WalletNotFoundError | InsufficientFundsError;
+  | InvalidAmountError
+  | BelowMinimumPayoutError
+  | AboveMaximumPayoutError
+  | WalletNotFoundError
+  | InsufficientFundsError;
 
 export type UpdatePayoutError = PayoutNotFoundError | InvalidTransitionError;
 
 export interface PayoutService {
-  /** Reserves `amount` from the wallet and creates a pending payout. */
+  /**
+   * Requests a payout of `amount` from the wallet. Amounts below `minPayoutAmount` or above
+   * `maxPayoutAmount` are refused before the wallet is touched; otherwise the amount is reserved
+   * from the wallet and a pending payout is created.
+   */
   request(walletId: string, amount: number): Result<Payout, RequestPayoutError>;
   approve(payoutId: string): Result<Payout, UpdatePayoutError>;
   startProcessing(payoutId: string): Result<Payout, UpdatePayoutError>;
@@ -44,6 +53,11 @@ export interface PayoutServiceDeps {
   readonly ledger: Ledger;
   readonly config?: Config;
   readonly clock?: Clock;
+}
+
+/** A cap only applies when it is a whole number of minor units above zero; any other value refuses every request. */
+function isUsableCap(maximum: number): boolean {
+  return Number.isSafeInteger(maximum) && maximum > 0;
 }
 
 export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
@@ -103,6 +117,15 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
           code: 'BELOW_MINIMUM_PAYOUT',
           message: `payouts must be at least ${String(config.minPayoutAmount)}, got ${String(valid.value)}`,
           minimum: config.minPayoutAmount,
+          requested: valid.value,
+        });
+      }
+      const maximum = config.maxPayoutAmount;
+      if (!isUsableCap(maximum) || valid.value > maximum) {
+        return err({
+          code: 'ABOVE_MAXIMUM_PAYOUT',
+          message: `payouts must be at most ${String(maximum)}, got ${String(valid.value)}`,
+          maximum,
           requested: valid.value,
         });
       }
