@@ -1,5 +1,5 @@
 import { sequentialIds, systemClock, type Clock } from '../clock.js';
-import { defaultConfig, type Config } from '../config.js';
+import { assertPayoutFee, defaultConfig, type Config } from '../config.js';
 import {
   err,
   ok,
@@ -22,17 +22,26 @@ export type RequestPayoutError =
 export type UpdatePayoutError = PayoutNotFoundError | InvalidTransitionError;
 
 export interface PayoutService {
-  /** Reserves `amount` from the wallet and creates a pending payout. */
+  /**
+   * Holds `amount` plus the configured `payoutFee` from the wallet in one withdrawal and
+   * creates a pending payout.
+   */
   request(walletId: string, amount: number): Result<Payout, RequestPayoutError>;
   approve(payoutId: string): Result<Payout, UpdatePayoutError>;
   startProcessing(payoutId: string): Result<Payout, UpdatePayoutError>;
-  /** Marks the payout as sent and records it in the ledger. */
+  /**
+   * Marks the payout as sent and records the amount debit in the ledger, plus a separate
+   * fee debit when the payout's fee is above 0.
+   */
   markPaid(payoutId: string): Result<Payout, UpdatePayoutError>;
   /** Marks a processing payout as failed. The reserved funds stay held until it is retried or cancelled. */
   markFailed(payoutId: string): Result<Payout, UpdatePayoutError>;
   /** Puts a failed payout back to pending. */
   retry(payoutId: string): Result<Payout, UpdatePayoutError>;
-  /** Cancels the payout and returns the reserved funds to the wallet. */
+  /**
+   * Cancels the payout and deposits its stored amount plus its stored fee back into its wallet
+   * in a single call. No ledger entry is made.
+   */
   cancel(payoutId: string): Result<Payout, UpdatePayoutError>;
   get(payoutId: string): Payout | undefined;
   /** Payouts that have not reached a terminal status, oldest first. */
@@ -42,6 +51,10 @@ export interface PayoutService {
 export interface PayoutServiceDeps {
   readonly wallets: WalletStore;
   readonly ledger: Ledger;
+  /**
+   * Settings; defaults to `defaultConfig`. Construction throws a RangeError when its
+   * `payoutFee` is not a non-negative safe integer.
+   */
   readonly config?: Config;
   readonly clock?: Clock;
 }
@@ -49,13 +62,14 @@ export interface PayoutServiceDeps {
 export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
   const { wallets, ledger } = deps;
   const config = deps.config ?? defaultConfig;
+  const payoutFee = assertPayoutFee(config.payoutFee);
   const clock = deps.clock ?? systemClock;
   const nextId = sequentialIds('po');
   const payouts = new Map<string, Payout>();
 
   const settle = (payout: Payout, to: PayoutStatus): void => {
     if (to === 'cancelled') {
-      const refund = wallets.deposit(payout.walletId, payout.amount);
+      const refund = wallets.deposit(payout.walletId, payout.amount + payout.fee);
       if (!refund.ok) {
         throw new Error(`could not refund payout ${payout.id}: ${refund.error.message}`);
       }
@@ -69,6 +83,17 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
       });
       if (!entry.ok) {
         throw new Error(`could not record payout ${payout.id}: ${entry.error.message}`);
+      }
+      if (payout.fee > 0) {
+        const feeEntry = ledger.append({
+          account: payout.walletId,
+          direction: 'debit',
+          amount: payout.fee,
+          description: `payout ${payout.id} fee`,
+        });
+        if (!feeEntry.ok) {
+          throw new Error(`could not record payout ${payout.id} fee: ${feeEntry.error.message}`);
+        }
       }
     }
   };
@@ -106,7 +131,15 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
           requested: valid.value,
         });
       }
-      const reserved = wallets.withdraw(walletId, valid.value);
+      const total = valid.value + payoutFee;
+      if (!Number.isSafeInteger(total)) {
+        return err({
+          code: 'INVALID_AMOUNT',
+          message: `amount ${String(valid.value)} plus payout fee ${String(payoutFee)} is not a safe integer number of minor units`,
+          amount: valid.value,
+        });
+      }
+      const reserved = wallets.withdraw(walletId, total);
       if (!reserved.ok) {
         return reserved;
       }
@@ -115,6 +148,7 @@ export function createPayoutService(deps: PayoutServiceDeps): PayoutService {
         id: nextId(),
         walletId,
         amount: valid.value,
+        fee: payoutFee,
         status: 'pending',
         requestedAt: now,
         updatedAt: now,

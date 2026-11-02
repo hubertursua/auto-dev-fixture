@@ -19,8 +19,12 @@ does no I/O; callers own persistence and transport.
   `INSUFFICIENT_FUNDS` rather than going negative.
 - **Ledger** entries are append-only credits and debits; balances are derived
   from the entries.
-- **Payouts** move money out of a wallet. Requesting one reserves the amount;
-  cancelling returns it; paying records a debit in the ledger.
+- **Payouts** move money out of a wallet. Requesting one withdraws
+  `amount + payoutFee` from the wallet in a single step, or fails with
+  `INSUFFICIENT_FUNDS` reporting that sum when the wallet cannot cover it. Each
+  payout keeps its `amount` and its `fee` as separate fields. Cancelling gives
+  both back to the wallet; paying records a debit of the amount in the ledger,
+  plus a second debit described `payout <id> fee` when `payoutFee` is above 0.
 
   | Status       | Can move to                    |
   | ------------ | ------------------------------ |
@@ -37,7 +41,11 @@ does no I/O; callers own persistence and transport.
 - **Expiry windows** (`validateExpiry`) take an `issuedAt` and an `expiresAt`
   (a `Date` or an ISO 8601 string); `expiresAt` must be after `issuedAt`.
 - **Configuration** lives in `src/config.ts`: `defaultConfig` plus
-  `withOverrides(partial)`. Stores and services accept a `config` option.
+  `withOverrides(partial)`. Stores and services accept a `config` option. The
+  settings are `defaultPageSize`, `maxPageSize`, `minPayoutAmount` and
+  `payoutFee` (a flat fee in minor units, a non-negative safe integer, default
+  0; an invalid value makes `withOverrides` and `createPayoutService` throw a
+  `RangeError`).
 
 Time and ids are injected (`clock` option, sequential ids), so behaviour is
 deterministic in tests.

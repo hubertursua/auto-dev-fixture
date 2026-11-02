@@ -14,8 +14,10 @@ export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
 export interface Payout {
   readonly id: string;
   readonly walletId: string;
-  /** Amount in minor units. */
+  /** Amount in minor units. Excludes the fee. */
   readonly amount: number;
+  /** Flat fee in minor units, charged on top of `amount`. */
+  readonly fee: number;
   readonly status: PayoutStatus;
   readonly requestedAt: Date;
   readonly updatedAt: Date;

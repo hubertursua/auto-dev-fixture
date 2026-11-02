@@ -13,6 +13,7 @@ const payout = (status: PayoutStatus): Payout => ({
   id: 'po_1',
   walletId: 'w1',
   amount: 5_000,
+  fee: 125,
   status,
   requestedAt: at,
   updatedAt: at,
@@ -66,6 +67,11 @@ describe('payout status', () => {
 
   it('treats paid and cancelled as terminal', () => {
     expect(PAYOUT_STATUSES.filter(isTerminal)).toEqual(['paid', 'cancelled']);
+  });
+
+  it('carries the fee across a status change', () => {
+    const result = transition(payout('pending'), 'approved');
+    expect(result).toMatchObject({ ok: true, value: { status: 'approved', fee: 125 } });
   });
 
   it('does not modify the payout it is given', () => {
