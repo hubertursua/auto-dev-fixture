@@ -32,6 +32,19 @@ function notFound(walletId: string): WalletNotFoundError {
   return { code: 'WALLET_NOT_FOUND', message: `wallet ${walletId} does not exist`, walletId };
 }
 
+function insufficientFunds(
+  walletId: string,
+  available: number,
+  requested: number,
+): InsufficientFundsError {
+  return {
+    code: 'INSUFFICIENT_FUNDS',
+    message: `wallet ${walletId} cannot cover ${String(requested)}: only ${String(available)} available`,
+    available,
+    requested,
+  };
+}
+
 export function createWalletStore(): WalletStore {
   const balances = new Map<string, number>();
 
@@ -79,12 +92,7 @@ export function createWalletStore(): WalletStore {
         return err(notFound(walletId));
       }
       if (valid.value > balance) {
-        return err({
-          code: 'INSUFFICIENT_FUNDS',
-          message: `wallet ${walletId} has ${String(balance)} available, ${String(valid.value)} requested`,
-          available: balance,
-          requested: valid.value,
-        });
+        return err(insufficientFunds(walletId, balance, valid.value));
       }
       const updated = balance - valid.value;
       balances.set(walletId, updated);

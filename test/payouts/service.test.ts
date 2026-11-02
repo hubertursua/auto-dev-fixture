@@ -51,8 +51,29 @@ describe('payout service', () => {
     expect(payouts.request('w1', 100).ok).toBe(true);
     expect(payouts.request('w1', 99)).toMatchObject({
       ok: false,
-      error: { code: 'BELOW_MINIMUM_PAYOUT', minimum: 100, requested: 99 },
+      error: {
+        code: 'BELOW_MINIMUM_PAYOUT',
+        message: 'payouts must be at least 100, got 99',
+        minimum: 100,
+        requested: 99,
+      },
     });
+  });
+
+  it('checks the payout floor before the wallet balance', () => {
+    wallets.open('low');
+    wallets.deposit('low', 30);
+    expect(payouts.request('low', 60)).toMatchObject({
+      ok: false,
+      error: {
+        code: 'BELOW_MINIMUM_PAYOUT',
+        message: 'payouts must be at least 100, got 60',
+        minimum: 100,
+        requested: 60,
+      },
+    });
+    expect(payouts.listOpen()).toEqual([]);
+    expect(wallets.get('low')).toMatchObject({ value: { balance: 30 } });
   });
 
   it('uses the configured minimum', () => {
@@ -80,6 +101,37 @@ describe('payout service', () => {
     });
     expect(payouts.listOpen()).toEqual([]);
     expect(balance()).toBe(10_000);
+  });
+
+  it('hands back the full wallet error for a payout above the balance', () => {
+    expect(payouts.request('w1', 12_345)).toStrictEqual({
+      ok: false,
+      error: {
+        code: 'INSUFFICIENT_FUNDS',
+        message: 'wallet w1 cannot cover 12345: only 10000 available',
+        available: 10_000,
+        requested: 12_345,
+      },
+    });
+    expect(payouts.listOpen()).toEqual([]);
+    expect(balance()).toBe(10_000);
+  });
+
+  it('reports the balance left after earlier reservations', () => {
+    requested(2_500);
+    expect(payouts.request('w1', 7_501)).toStrictEqual({
+      ok: false,
+      error: {
+        code: 'INSUFFICIENT_FUNDS',
+        message: 'wallet w1 cannot cover 7501: only 7500 available',
+        available: 7_500,
+        requested: 7_501,
+      },
+    });
+    const open = payouts.listOpen();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ walletId: 'w1', amount: 2_500, status: 'pending' });
+    expect(balance()).toBe(7_500);
   });
 
   it('records a debit in the ledger once paid', () => {
@@ -137,5 +189,47 @@ describe('payout service', () => {
     payouts.markPaid(paid);
     payouts.cancel(cancelled);
     expect(payouts.listOpen().map((p) => p.id)).toEqual([open]);
+  });
+
+  it('returns the cannot-cover insufficient-funds error for a payout above the balance', () => {
+    expect(payouts.request('w1', 10_001)).toStrictEqual({
+      ok: false,
+      error: {
+        code: 'INSUFFICIENT_FUNDS',
+        message: 'wallet w1 cannot cover 10001: only 10000 available',
+        available: 10_000,
+        requested: 10_001,
+      },
+    });
+    expect(payouts.listOpen()).toEqual([]);
+    expect(balance()).toBe(10_000);
+  });
+
+  it('reports what is left after a pending payout in the cannot-cover message', () => {
+    requested(4_000);
+    const result = payouts.request('w1', 6_001);
+    if (result.ok) throw new Error('expected a failure');
+    expect(result.error).toMatchObject({
+      code: 'INSUFFICIENT_FUNDS',
+      message: 'wallet w1 cannot cover 6001: only 6000 available',
+      available: 6_000,
+      requested: 6_001,
+    });
+  });
+
+  it('still rejects a payout below the minimum with its existing message', () => {
+    expect(payouts.request('w1', 99)).toMatchObject({
+      ok: false,
+      error: { code: 'BELOW_MINIMUM_PAYOUT', message: 'payouts must be at least 100, got 99' },
+    });
+  });
+
+  it('reports a payout both below the minimum and over the balance as below the minimum', () => {
+    wallets.open('low');
+    wallets.deposit('low', 50);
+    expect(payouts.request('low', 99)).toMatchObject({
+      ok: false,
+      error: { code: 'BELOW_MINIMUM_PAYOUT' },
+    });
   });
 });

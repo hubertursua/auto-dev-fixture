@@ -59,12 +59,30 @@ describe('wallet store', () => {
     it('rejects an invalid amount or a missing wallet', () => {
       expect(wallets.withdraw('w1', 10.5)).toMatchObject({
         ok: false,
-        error: { code: 'INVALID_AMOUNT' },
+        error: {
+          code: 'INVALID_AMOUNT',
+          message: 'amount must be a positive integer number of minor units, got 10.5',
+        },
       });
       expect(wallets.withdraw('nope', 10)).toMatchObject({
         ok: false,
-        error: { code: 'WALLET_NOT_FOUND' },
+        error: {
+          code: 'WALLET_NOT_FOUND',
+          message: 'wallet nope does not exist',
+          walletId: 'nope',
+        },
       });
+    });
+
+    it('reports a non-integer amount above the balance as an invalid amount', () => {
+      expect(wallets.withdraw('w1', 1_500.5)).toMatchObject({
+        ok: false,
+        error: {
+          code: 'INVALID_AMOUNT',
+          message: 'amount must be a positive integer number of minor units, got 1500.5',
+        },
+      });
+      expect(wallets.get('w1')).toMatchObject({ value: { balance: 1_000 } });
     });
 
     it('allows withdrawing the whole balance', () => {
@@ -72,16 +90,133 @@ describe('wallet store', () => {
     });
 
     it('returns INSUFFICIENT_FUNDS one unit over the balance', () => {
-      expect(wallets.withdraw('w1', 1_001)).toEqual({
+      expect(wallets.withdraw('w1', 1_001)).toStrictEqual({
         ok: false,
         error: {
           code: 'INSUFFICIENT_FUNDS',
-          message: 'wallet w1 has 1000 available, 1001 requested',
+          message: 'wallet w1 cannot cover 1001: only 1000 available',
           available: 1_000,
           requested: 1_001,
         },
       });
       expect(wallets.get('w1')).toMatchObject({ value: { balance: 1_000 } });
+    });
+
+    it('says the wallet cannot cover the requested amount when withdrawing more than the balance', () => {
+      const result = wallets.withdraw('w1', 1_001);
+      if (result.ok) throw new Error('expected a failure');
+      expect(result.error.message).toBe('wallet w1 cannot cover 1001: only 1000 available');
+    });
+
+    it('prints a zero balance as 0 in the cannot-cover message', () => {
+      expect(wallets.withdraw('w1', 1_000).ok).toBe(true);
+      const result = wallets.withdraw('w1', 5);
+      if (result.ok) throw new Error('expected a failure');
+      expect(result.error.message).toBe('wallet w1 cannot cover 5: only 0 available');
+    });
+
+    it('prints large amounts without separators in the cannot-cover message', () => {
+      expect(wallets.deposit('w1', 999_000).ok).toBe(true);
+      const result = wallets.withdraw('w1', 1_000_001);
+      if (result.ok) throw new Error('expected a failure');
+      expect(result.error.message).toBe('wallet w1 cannot cover 1000001: only 1000000 available');
+    });
+
+    it('returns exactly the insufficient-funds code, new message, available and requested', () => {
+      expect(wallets.withdraw('w1', 1_001)).toStrictEqual({
+        ok: false,
+        error: {
+          code: 'INSUFFICIENT_FUNDS',
+          message: 'wallet w1 cannot cover 1001: only 1000 available',
+          available: 1_000,
+          requested: 1_001,
+        },
+      });
+    });
+
+    it('keeps the insufficient-funds error to code, message, available and requested only', () => {
+      const result = wallets.withdraw('w1', 1_001);
+      if (result.ok) throw new Error('expected a failure');
+      expect(Object.keys(result.error).sort()).toEqual([
+        'available',
+        'code',
+        'message',
+        'requested',
+      ]);
+      expect(result.error).toMatchObject({
+        code: 'INSUFFICIENT_FUNDS',
+        available: 1_000,
+        requested: 1_001,
+      });
+    });
+
+    it('lets a withdrawal of exactly the balance succeed and leave zero', () => {
+      expect(wallets.withdraw('w1', 1_000)).toEqual({ ok: true, value: { id: 'w1', balance: 0 } });
+      expect(wallets.get('w1')).toMatchObject({ value: { balance: 0 } });
+    });
+
+    it('still reports a missing wallet as not existing when withdrawing', () => {
+      expect(wallets.withdraw('nope', 10)).toMatchObject({
+        ok: false,
+        error: { code: 'WALLET_NOT_FOUND', message: 'wallet nope does not exist' },
+      });
+    });
+
+    it('still reports a fractional withdrawal amount as invalid', () => {
+      expect(wallets.withdraw('w1', 10.5)).toMatchObject({
+        ok: false,
+        error: {
+          code: 'INVALID_AMOUNT',
+          message: 'amount must be a positive integer number of minor units, got 10.5',
+        },
+      });
+    });
+
+    it('reports an amount that is both fractional and over the balance as invalid, not insufficient funds', () => {
+      expect(wallets.withdraw('w1', 1_000.5)).toMatchObject({
+        ok: false,
+        error: { code: 'INVALID_AMOUNT' },
+      });
+    });
+
+    it('prints a zero balance as 0 and uses the given wallet id', () => {
+      wallets.open('empty');
+      expect(wallets.withdraw('empty', 5)).toStrictEqual({
+        ok: false,
+        error: {
+          code: 'INSUFFICIENT_FUNDS',
+          message: 'wallet empty cannot cover 5: only 0 available',
+          available: 0,
+          requested: 5,
+        },
+      });
+    });
+
+    it('prints large amounts as bare digits without swapping them', () => {
+      wallets.open('big');
+      wallets.deposit('big', 1_000_000);
+      expect(wallets.withdraw('big', 1_000_001)).toStrictEqual({
+        ok: false,
+        error: {
+          code: 'INSUFFICIENT_FUNDS',
+          message: 'wallet big cannot cover 1000001: only 1000000 available',
+          available: 1_000_000,
+          requested: 1_000_001,
+        },
+      });
+      expect(wallets.get('big')).toMatchObject({ value: { balance: 1_000_000 } });
+    });
+
+    it('keeps the INSUFFICIENT_FUNDS error to exactly its four keys', () => {
+      const result = wallets.withdraw('w1', 1_001);
+      if (result.ok) throw new Error('expected a failure');
+      expect(Object.keys(result.error).sort()).toEqual([
+        'available',
+        'code',
+        'message',
+        'requested',
+      ]);
+      expect(result.error.code).toBe('INSUFFICIENT_FUNDS');
     });
   });
 });
